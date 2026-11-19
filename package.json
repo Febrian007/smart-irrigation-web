@@ -12,6 +12,7 @@
     "@firebase/app": "^0.16.7",
     "@firebase/auth": "^1.13.11",
     "@firebase/database": "^1.1.6",
+    "firebase": "^13.4.0",
     "lucide-react": "^1.75.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
