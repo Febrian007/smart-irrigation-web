@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { createAdapter } from '../adapters/irrigationAdapter';
 
 const INITIAL_STATE = {
-  source: 'sse',
+  source: 'firebase',
   url: 'http://192.168.137.10',
-  deviceId: 'esp32-kebun-01',
-  simActive: false,
+  deviceId: import.meta.env.VITE_FIREBASE_DEVICE_ID || 'esp32-kebun-01',
+  simActive: true,
   connStatus: 'offline',
   connInfo: 'Belum terhubung',
   lastReadingTs: null,
@@ -90,7 +90,8 @@ export function useIrrigation() {
   }, []);
 
   useEffect(() => {
-    attachAdapter('sse');
+    const adapter = attachAdapter(INITIAL_STATE.simActive ? 'simulation' : INITIAL_STATE.source);
+    if (INITIAL_STATE.simActive) adapter.connect({});
     const timer = setInterval(() => {
       setState((prev) => {
         if (!prev.lastReadingTs) return prev;
@@ -109,10 +110,10 @@ export function useIrrigation() {
     attachAdapter(source);
   };
 
-  const connect = (url) => {
-    setState((prev) => ({ ...prev, url, simActive: false }));
+  const connect = ({ url = state.url, deviceId = state.deviceId } = {}) => {
+    setState((prev) => ({ ...prev, url, deviceId, simActive: false }));
     const adapter = attachAdapter(state.source);
-    adapter.connect({ url, deviceId: state.deviceId });
+    adapter.connect({ url, deviceId });
   };
 
   const toggleSimulation = () => {
@@ -122,7 +123,8 @@ export function useIrrigation() {
       const adapter = attachAdapter('simulation');
       adapter.connect({});
     } else {
-      attachAdapter(state.source);
+      const adapter = attachAdapter(state.source);
+      adapter.connect({ url: state.url, deviceId: state.deviceId });
     }
   };
 

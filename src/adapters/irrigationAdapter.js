@@ -1,6 +1,23 @@
-// Konfigurasi Firebase (Placeholder - belum dihubungkan)
-export const FIREBASE_CONFIG = null;
-// TODO: isi { apiKey, authDomain, databaseURL, projectId, appId } dari Firebase Console.
+import { initializeApp, getApps } from '@firebase/app';
+import { getAuth, signInAnonymously } from '@firebase/auth';
+import { getDatabase, onValue, ref, set, serverTimestamp } from '@firebase/database';
+
+const env = import.meta.env;
+const firebaseConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL: env.VITE_FIREBASE_DATABASE_URL,
+  projectId: env.VITE_FIREBASE_PROJECT_ID,
+  appId: env.VITE_FIREBASE_APP_ID,
+};
+
+function getFirebaseDatabase() {
+  if (Object.values(firebaseConfig).some((value) => !value)) {
+    throw new Error('Konfigurasi Firebase belum lengkap. Isi file .env terlebih dahulu.');
+  }
+  const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+  return { app, database: getDatabase(app) };
+}
 
 export function createSSEAdapter() {
   let es = null;
@@ -207,20 +224,83 @@ export function createSimulationAdapter() {
 
 export function createFirebaseAdapter() {
   let statusCb = () => {};
+  let readingCb = () => {};
+  let unsubscribe = null;
+  let database = null;
+  let deviceId = '';
   return {
     id: 'firebase',
-    async connect() {
-      if (!FIREBASE_CONFIG) {
-        statusCb('offline', 'Belum dikonfigurasi');
-        return;
+    async connect(config = {}) {
+      try {
+        deviceId = (config.deviceId || 'esp32-kebun-01').trim();
+        if (!deviceId) throw new Error('Device ID kosong');
+        const firebase = getFirebaseDatabase();
+        database = firebase.database;
+        statusCb('connecting', 'Menghubungkan ke Firebase…');
+        await signInAnonymously(getAuth(firebase.app));
+        unsubscribe = onValue(
+          ref(database, `devices/${deviceId}/live`),
+          (snapshot) => {
+            const d = snapshot.val();
+            if (!d) {
+              statusCb('offline', 'Menunggu data perangkat');
+              return;
+            }
+            statusCb('online', 'Terhubung ke Firebase');
+            const value = (...keys) => {
+              for (const key of keys) if (d[key] !== undefined && d[key] !== null) return Number(d[key]);
+              return undefined;
+            };
+            const rawMode = d.mode || d.pump_mode || 'auto';
+            const mode = ({ AUTO: 'auto', MANUAL_ON: 'manual_on', MANUAL_OFF: 'manual_off' })[rawMode] || rawMode;
+            const pumpValue = d.pump ?? d.pump_on ?? d.irrigation_pump;
+            readingCb({
+              ts: d.ts || d.updatedAt || Date.now(),
+              temp: value('temp', 'temperature'),
+              hum: value('hum', 'humidity'),
+              soil: value('soil', 'soil_moisture'),
+              tank: value('tank', 'water_level'),
+              pump: typeof pumpValue === 'boolean' ? pumpValue : undefined,
+              mode,
+              pumpSeconds: value('pumpSeconds', 'pump_active_sec'),
+              thresholds: d.thresholds || ((d.soil_threshold !== undefined && d.tank_threshold !== undefined)
+                ? { soil: Number(d.soil_threshold), tank: Number(d.tank_threshold) }
+                : undefined),
+              addLog: true,
+            });
+          },
+          (error) => statusCb('error', `Firebase: ${error.message}`),
+        );
+      } catch (error) {
+        statusCb('error', error.message || 'Gagal menghubungkan Firebase');
       }
-      // TODO: install `firebase` (`npm install firebase`) lalu hubungkan ke RTDB `/devices/{deviceId}/live`
     },
-    disconnect() { statusCb('offline', 'Belum dikonfigurasi'); },
-    onReading() {},
+    disconnect() {
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+      statusCb('offline', 'Belum terhubung');
+    },
+    onReading(cb) { readingCb = cb; },
     onStatus(cb) { statusCb = cb; },
-    async sendCommand() { throw new Error('Firebase belum dikonfigurasi'); },
-    async saveThresholds() { throw new Error('Firebase belum dikonfigurasi'); },
+    async sendCommand(cmd) {
+      if (!database) database = getFirebaseDatabase().database;
+      const mode = cmd.type === 'mode' ? 'auto' : (cmd.value === 'on' ? 'manual_on' : 'manual_off');
+      await set(ref(database, `devices/${deviceId}/commands/pump`), {
+        mode,
+        pump: mode === 'manual_on',
+        updatedAt: serverTimestamp(),
+      });
+      readingCb({ ts: Date.now(), mode, pump: mode === 'manual_on', addLog: false });
+    },
+    async saveThresholds(thresholds) {
+      if (!database) database = getFirebaseDatabase().database;
+      await set(ref(database, `devices/${deviceId}/config/thresholds`), {
+        soil: thresholds.soil,
+        tank: thresholds.tank,
+        updatedAt: serverTimestamp(),
+      });
+      readingCb({ ts: Date.now(), thresholds, addLog: false });
+    },
   };
 }
 

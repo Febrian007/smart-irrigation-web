@@ -10,6 +10,7 @@ export function ConnectionBar({
   onToggleSim,
 }) {
   const [url, setUrl] = useState(initialUrl);
+  const [firebaseDeviceId, setFirebaseDeviceId] = useState(deviceId);
   const isFb = source === 'firebase' && !simActive;
 
   return (
@@ -22,8 +23,8 @@ export function ConnectionBar({
             value={source}
             onChange={(e) => onSourceChange(e.target.value)}
           >
-            <option value="sse">Lokal (SSE ESP32)</option>
             <option value="firebase">Jarak Jauh (Firebase)</option>
+            <option value="sse">Lokal (SSE ESP32)</option>
           </select>
         </div>
 
@@ -42,7 +43,7 @@ export function ConnectionBar({
         ) : (
           <div className="field-group" style={{ minWidth: 180 }}>
             <label className="lbl" htmlFor="deviceIdInput">Device ID</label>
-            <input id="deviceIdInput" className="mono" type="text" value={deviceId} disabled />
+            <input id="deviceIdInput" className="mono" type="text" value={firebaseDeviceId} onChange={(e) => setFirebaseDeviceId(e.target.value)} />
           </div>
         )}
 
@@ -50,7 +51,7 @@ export function ConnectionBar({
           className="btn-accent"
           type="button"
           disabled={isFb}
-          onClick={() => onConnect(url)}
+          onClick={() => onConnect({ url, deviceId: firebaseDeviceId })}
         >
           Hubungkan
         </button>
